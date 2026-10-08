@@ -1,0 +1,93 @@
+# Merchant setup in the Supliful app
+
+Everything the API can do starts in the merchant's Supliful account. If a call fails because
+something is missing here, no code change fixes it: the merchant has to do it in the app.
+
+## 1. Membership: Pro or Enterprise
+
+API connections need a **Pro or Enterprise** membership. It is checked on every request, not
+only at setup:
+
+- Without an active membership, or on a lower plan, the "Supliful API" card on the Stores page is
+  disabled with "A Pro membership is required to use the Supliful API" or "Upgrade to a Pro
+  membership to use the Supliful API".
+- If the membership lapses or is downgraded later, the keys are left untouched but
+  `POST /v1/orders` answers `403 subscription-required`. Upgrading again restores it; no new key
+  is needed.
+
+Publishing products also needs a saved label, a payment method, a verified email and an active
+membership. The product editor shows these as a checklist next to **Publish**.
+
+## 2. Create the API connection and get the key
+
+1. Open **Stores** and choose the **Supliful API** card ("Push orders for fulfillment via Supliful
+   Public API").
+2. Name the connection so it can be told apart from other stores, e.g. "Warehouse integration",
+   and click **Create connection**.
+3. The key is shown **once**. Copy it straight into the backend's secret store
+   (`SUPLIFUL_API_KEY`). It cannot be shown again; a lost key means issuing a new one.
+
+The connection then appears in the store list as "Connected via Supliful API", or "Requires an
+enabled API key" when it has none.
+
+## 3. Manage keys
+
+[Store list](https://supliful.com/stores) → the connection's menu → **Settings** → **API keys** tab:
+
+- **Add a key** with a name (e.g. "Production", "Staging"). Each key has its own rate-limit counter,
+  so give each workload its own key. The table shows name, created and last used.
+- **Rotate** issues a new key and revokes the old one **immediately**. Deploy the new value
+  everywhere at once, or the old deploys start failing with 401.
+- **Revoke** stops a key immediately. Revoking the only enabled key stops all API requests for
+  the connection until another is added.
+
+## 4. Configure webhooks
+
+Same Settings dialog → **Webhooks** tab:
+
+1. Enter the receiver URL (`https://`, publicly resolvable) and click **Add webhook**.
+2. Reveal or copy the endpoint's **signing secret** and store it in `SUPLIFUL_WEBHOOK_SECRETS`.
+3. Verify the receiver with `POST /v1/test/webhooks` (see `webhooks.md`).
+
+Per endpoint you can also:
+
+- **Switch it off and on.** A switched-off endpoint receives nothing. It is also switched off
+  automatically after three days without a successful delivery; switch it back on here.
+- **Edit URL**, e.g. when a tunnel's hostname changes. Pending retries go to the new URL.
+- **Rotate secret.** The previous secret keeps working for 24 hours, so deploy the new one within
+  that window. Keep both in `SUPLIFUL_WEBHOOK_SECRETS` meanwhile.
+- **Remove.** Stops delivery to the URL and deletes its delivery history.
+
+The app does not yet let you choose event types: every endpoint receives all ten. Filter on
+`type` in the receiver. It also has no delivery log or resend button yet, so log every delivery
+you receive and reconcile with `GET /v1/orders/{orderId}` if you suspect one was missed.
+
+## 5. Publish and unpublish products
+
+A product is only visible to the connection, and orderable through it, while it is published to
+that connection.
+
+- **Publish:** open the product under **My Products**, finish the checklist, and click **Publish**.
+  With more than one store, choose the API connection in "Select one of your stores:". The
+  partner receives `product.published`, and the product appears in `GET /v1/products`.
+- **Unpublish:** click **Unpublish** on the product. The partner receives `product.unpublished`;
+  the product disappears from `GET /v1/products` and new orders naming it are refused with
+  `400 validation-failed` on `lines.productId`. Existing orders stay readable.
+
+Current limits of the app, worth telling the merchant up front:
+
+- The app publishes a product to **one store at a time**, and only while it is not published
+  anywhere. A product already live in Shopify must be unpublished there before it can be
+  published to the API connection.
+- **Unpublish removes the product from every store** it is published to, not only from the API
+  connection.
+- Editing a published product's name, description, SKU or artwork sends `product.updated`.
+
+## Checklist before the first real order
+
+- [ ] Pro or Enterprise membership active
+- [ ] API connection created, key stored as a backend secret
+- [ ] `GET /v1/me` returns the connection
+- [ ] Webhook endpoint added, secret stored, test delivery received and verified
+- [ ] Products published to the connection and listed by `GET /v1/products`
+- [ ] A `testMode: true` order walked through the sandbox transitions
