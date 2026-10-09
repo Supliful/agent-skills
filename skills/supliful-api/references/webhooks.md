@@ -4,21 +4,22 @@ Supliful POSTs JSON to the endpoint registered on the connection. Two headers ma
 
 | Header | Meaning |
 |---|---|
-| `x-supliful-signature` | `t=<unix seconds>,v1=<hex>[,v1=<hex>...]`. HMAC-SHA256 over `${t}.${rawBody}` keyed by the endpoint secret. During a secret rotation there is one `v1=` per live secret; match any |
+| `x-supliful-signature` | `t=<unix seconds>,v1=<hex>[,v1=<hex>...]`. HMAC-SHA256 over `${t}.${rawBody}` keyed by the endpoint secret, the whole string including its `whsec_` prefix. During a secret rotation there is one `v1=` per live secret; match any |
 | `x-supliful-idempotency-key` | Stable across every retry of one delivery. Deduplicate on it |
 
-Reject a `t` older than 300 seconds. Respond with any 2xx to acknowledge. Supliful retries
-5xx, 408, 429 and connection failures with backoff; any other 4xx is treated as permanent.
+Reject a `t` older than 300 seconds. Respond with any 2xx within **10 seconds** to acknowledge;
+a slower answer counts as a failure, and so does a redirect. Supliful retries 5xx, 408, 429,
+timeouts and connection failures with backoff; any other 4xx is treated as permanent.
 
 ## Operating limits
 
 | Topic | Behaviour |
 |---|---|
-| Endpoint URL | Must be `https://` and publicly resolvable. A private-network address is refused when saved and again at delivery |
-| Event selection | Not configurable in the app yet: every endpoint receives all ten types. Filter on `type` |
+| Endpoint URL | Must be `https://` and publicly resolvable, with no credentials in it and a dotted public hostname (not `.local`, `.internal` and the like). A private-network address is refused when saved and again at delivery |
+| Event selection | Not configurable in the app yet: a new endpoint receives all ten types (one added before product events existed may lack the three `product.*` ones). Filter on `type` |
 | Secrets | One per endpoint; two connections never share one. During rotation the retired secret keeps working for **24 hours**, which is your window to redeploy |
-| Retries | For about **three days**, waiting longer each time, from a minute up to a day. Every attempt repeats the same body and idempotency key |
-| Dead endpoint | An endpoint with no accepted delivery for **three days** is disabled. Switch it back on in the app once the URL works; nothing is delivered while it is off |
+| Retries | 9 attempts over about **three days**: then after 1 min, 5 min, 30 min, 2 h, 6 h, 12 h, 24 h, 24 h. Every attempt repeats the same body and idempotency key |
+| Dead endpoint | An endpoint with no accepted delivery for **three days** is disabled. Switch it back on in the app once the URL works. Events raised while it is off are dropped, not queued, and pending retries are abandoned: after re-enabling, reconcile open orders with `GET /v1/orders/{orderId}` |
 | Delivery log | Supliful records every attempt for **30 days**, but the app has no log view or resend button yet. Keep your own log of deliveries received |
 | Setup | Adding, editing, switching off, rotating and removing endpoints: `merchant-setup.md` |
 
@@ -45,7 +46,7 @@ export function verifySupliful(rawBody: string, header: string | undefined, secr
   const payload = `${t}.${rawBody}`;
   return secrets.some((secret) => {
     const expected = createHmac("sha256", secret).update(payload).digest("hex");
-    return sigs.some((s) => s.length === expected.length && timingSafeEqual(Buffer.from(s, "hex"), Buffer.from(expected, "hex")));
+    return sigs.some((s) => /^[0-9a-f]+$/.test(s) && s.length === expected.length && timingSafeEqual(Buffer.from(s, "hex"), Buffer.from(expected, "hex")));
   });
 }
 ```
@@ -74,10 +75,10 @@ Real deliveries carry `data.testMode: false`.
 | order.canceled | `orderId`, `externalOrderId` | Cancelled before it shipped |
 | order.onHold | `orderId`, `externalOrderId`, `reasons[]` | Blocked. A later hold arrives as another event |
 | order.onHoldReleased | `orderId`, `externalOrderId` | Moving again, whether cleared itself or resolved by a person |
-| order.shipmentCreated | `orderId`, `externalOrderId`, `shipmentId`, `trackingNumber`, `trackingUrl` | A parcel left the warehouse. Not order completion; several per order possible |
+| order.shipmentCreated | `orderId`, `externalOrderId`, `shipmentId`, `trackingNumber` or null, `trackingUrl` or null | A parcel is labelled and on its way. Not order completion; several per order possible. A parcel re-sent to replace a lost one arrives under the original order |
 | order.shipmentReturned | same as above | A parcel came back |
-| order.completed | `orderId`, `externalOrderId` | Every line fulfilled |
-| product.published | `productId`, `sku` | Merchant exposed the product; orderable from now |
+| order.completed | `orderId`, `externalOrderId` | Every line fulfilled. Can arrive again after a replacement parcel ships |
+| product.published | `productId`, `sku` or null | Merchant exposed the product; orderable from now |
 | product.unpublished | `productId`, `sku` | Withdrawn; orders naming it will be rejected |
 | product.updated | `productId`, `sku` | Name, description, SKU or artwork changed. Payload does not say which; refetch |
 
@@ -112,5 +113,5 @@ and posts a delivery. Test dedupe by sending the same key twice, staleness by pa
 timestamp as the fifth argument, and rejection by signing with the wrong secret.
 
 With Supliful: `POST /v1/test/webhooks {"event": "order.created"}` sends a real signed
-delivery carrying `data.testMode: true`. Your handler should log it and change nothing. It only
-reaches endpoints subscribed to that event type.
+delivery carrying `data.testMode: true`. Your handler should log it and change nothing. Its ids
+are placeholders (`test_…` for orders), so do not reject it for failing a UUID check.

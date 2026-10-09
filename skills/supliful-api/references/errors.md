@@ -13,8 +13,9 @@ Every error is an RFC 9457 problem document, `Content-Type: application/problem+
 ```
 
 Take the code from the last path segment of `type`, and branch on it: a status can carry more than
-one meaning. Both `account-unavailable` and `subscription-required` are 403; both
-`order-already-exists` and `order-not-cancelable` are 409. Some types add members: `errors[]` on
+one meaning, and one type can come with more than one status. Both `account-unavailable` and
+`subscription-required` are 403; both `order-already-exists` and `order-not-cancelable` are 409;
+`validation-failed` and `idempotency-key-reused` can both be 422. Some types add members: `errors[]` on
 validation-failed, `orderId` on order-already-exists and idempotency-key-reused, `orderStatus` on
 order-not-cancelable. Parse defensively: a non-JSON body
 (proxy error, HTML) should be wrapped into a synthetic problem rather than crashing.
@@ -23,10 +24,10 @@ order-not-cancelable. Parse defensively: a non-JSON body
 |---|---|---|---|
 | invalid-api-key | 401 | No key, wrong scheme, unknown, revoked, expired, or key without a reachable connection. Deliberately indistinguishable. Response carries `WWW-Authenticate: Bearer realm="Supliful Public API"` | Never. Fix config |
 | account-unavailable | 403 | Key is valid but the Supliful account behind it is disabled. Checked on every request; keys outlive account state | Not on a short interval. Human process, hours or days. Per account, not API wide |
-| subscription-required | 403 | Key and account are fine, but the merchant's membership does not include placing orders through the API (needs Pro or Enterprise). Only `POST /v1/orders` answers it; reads and cancels keep working | Not until the merchant changes plan. Pause order submission and tell the merchant |
+| subscription-required | 403 | Key and account are fine, but the merchant has no active Pro or Enterprise membership. Only `POST /v1/orders` answers it, and not for `testMode` orders; reads and cancels keep working | Not until the merchant changes plan. Pause order submission and tell the merchant |
 | order-not-cancelable | 409 | `POST /v1/orders/{orderId}/cancel` on an order past its window: accepted, under review (`PROCESSING`), or already with a warehouse. `orderStatus` is the status the order had when you asked | Never. Refetch the order and treat it as going ahead; to stop it, contact the merchant |
-| validation-failed | 400 | Parameters did not match the schema. `errors: [{path, message}]` names every failing field, dot-joined paths, array indexes as `lines.0.quantity` | Never unmodified. Log `errors` |
-| not-found | 404 | No route matches method and path. Returned before auth. `detail` names the method and path received | Never. Check `/v1` prefix, method, doubled slashes |
+| validation-failed | 400 or 422 | 400: parameters did not match the schema; `errors: [{path, message}]` names every failing field, dot-joined, array indexes as `lines.0.quantity`. 422: the request was well formed but Supliful refuses it (product not orderable or discontinued, address would fail, product not fulfillable yet, or a sandbox transition not allowed from the order's state); `errors` when there is a field to point at, otherwise only `detail` | Never unmodified. Log `errors` and `detail`; show address issues to the buyer |
+| not-found | 404 | Either no route matches the method and path (answered before auth; `detail` names what was received), or the order, product or test order is not on this connection | Never. Check `/v1` prefix and method; for a resource, check the id and the connection |
 | order-already-exists | 409 | `externalOrderId` belongs to another order on this connection. `orderId` is that order | Never the same request. If it was a retry, adopt `orderId`; else use a new externalOrderId |
 | idempotency-key-reused | 422 | Key already placed a different request. `orderId` is what it produced | Never. New key for a new order; identical payload for a retry |
 | rate-limit-exceeded | 429 | 600 requests per 60 seconds per key, shared across processes. May carry `Retry-After` seconds | Yes, after `Retry-After` or exponential backoff from a few seconds |

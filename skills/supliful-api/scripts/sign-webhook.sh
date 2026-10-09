@@ -5,7 +5,7 @@
 #
 # Examples:
 #   sign-webhook.sh devsecret http://localhost:4000/webhooks/supliful k1 \
-#     '{"type":"order.created","occurredAt":"2026-01-01T00:00:00Z","data":{"orderId":"11111111-1111-4111-8111-111111111111","externalOrderId":"VS-000001"}}'
+#     '{"type":"order.created","occurredAt":"2026-01-01T00:00:00Z","data":{"orderId":"11111111-1111-4111-8111-111111111111","externalOrderId":"VS-000001","testMode":false}}'
 #   # stale delivery (should be rejected):
 #   sign-webhook.sh devsecret http://localhost:4000/webhooks/supliful k2 '{...}' 1700000000
 set -euo pipefail

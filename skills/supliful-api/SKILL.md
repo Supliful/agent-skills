@@ -68,7 +68,7 @@ SUPLIFUL_WEBHOOK_SECRETS=          # comma separated; two values during a rotati
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/v1/ping` | No auth. `{status, servedAt}` |
-| GET | `/v1/me` | `{connection: {id, name}}` |
+| GET | `/v1/me` | `{connection: {id, name or null}}` |
 | GET | `/v1/products` | `limit` 1..100 (default 50), `cursor`, `sku`. Returns `{data, nextCursor}` |
 | GET | `/v1/products/{id}` | UUID. The only way to fetch exactly one product |
 | POST | `/v1/orders` | 201 created, 200 when the idempotent retry returned the existing order |
@@ -86,7 +86,7 @@ Field-level detail: `references/endpoints.md`.
 - **`sku` is a filter, not a lookup.** Two products may share a SKU, so `?sku=` returns a list.
   Never assume `data[0]`. Use the UUID to fetch one product.
 - **`available: false` or `status: "discontinued"` means stop selling.** Discontinued products still
-  resolve so open orders stay readable, but new orders for them are refused.
+  resolve so open orders stay readable, but a new order naming one is refused with 422.
 - **Ordering unknown product ids is not discovery.** A product the merchant has not exposed to
   your connection is refused the same way as a nonexistent one.
 - **Every order needs an idempotency key.** Send `Idempotency-Key` (1..255 chars) or `externalOrderId`
@@ -98,12 +98,15 @@ Field-level detail: `references/endpoints.md`.
   `order-already-exists` with the existing `orderId`. Both conflicts tell you which order exists: adopt it.
 - **A replay returns the order as it stands now**, not as it was when first created. Reconcile from it.
 - **Ordering needs the right membership.** `POST /v1/orders` answers 403 `subscription-required` when
-  the merchant's plan does not include API ordering (Pro or Enterprise). Every other call keeps
-  working. `account-unavailable` is also 403, so branch on the problem `type`, never on status alone.
-- **Order-time refusals are 400 `validation-failed`, and `errors[].path` says why.**
-  `lines.productId` "not available to this connection" means not exposed or withdrawn;
-  "exposed but cannot currently be fulfilled" means no warehouse can take it right now;
-  `shippingAddress` means the address would fail at label creation. Show the last one to the buyer.
+  the merchant has no active Pro or Enterprise membership. Every other call keeps working, and
+  `testMode` orders skip the check. `account-unavailable` is also 403, so branch on the problem
+  `type`, never on status alone.
+- **`validation-failed` is 400 for a malformed request and 422 for an order Supliful refuses.**
+  400: the body or query failed the schema, or neither idempotency key was sent. 422 (order-time):
+  `errors[].path` `lines.productId` "not available to this connection" means not exposed or
+  withdrawn, "is discontinued" means Supliful no longer makes it; `shippingAddress` means the address would fail at label creation (show it to the
+  buyer); a 422 with no `errors`, only `detail`, means the product exists but cannot be fulfilled
+  yet. Treat the 422s as a decision about the order, not a bug in your request.
 - **Prices are the merchant's.** Your retail price never reaches Supliful; the order carries no shipping cost.
 - **Tracking mail goes to the merchant's account email.** To inform the buyer, pass on
   `trackingUrl` from each shipment (`GET /v1/orders/{orderId}` and `order.shipmentCreated`).
@@ -128,7 +131,8 @@ Field-level detail: `references/endpoints.md`.
 | 409 `order-not-cancelable` | Terminal. Refetch the order; it has moved past its cancel window |
 | 400, 401, 404, 409, 422 | Terminal. Fix the request or configuration; do not retry unmodified |
 
-Branch on status first, then on the problem `type` where one status has several meanings (403, 409):
+Branch on status first, then on the problem `type` where one status has several meanings (403, 409,
+422):
 429 means the credential is fine, 401 means stop and fix configuration.
 Full catalogue of problem types, fields and fixes: `references/errors.md`.
 
@@ -148,9 +152,10 @@ Non-negotiables for a receiver:
    any other 4xx is treated as permanent.
 5. Ignore payloads with `data.testMode: true` for state changes; they describe nothing real.
    Real deliveries carry `testMode: false`.
-6. Register an `https://`, publicly resolvable URL, and expect endpoints to be switched off after
-   three days without a successful delivery. Every endpoint receives all ten event types (the app
-   cannot narrow them yet), so filter on `type`. Operating limits: `references/webhooks.md`.
+6. Register an `https://`, publicly resolvable URL, answer within 10 seconds, and do not redirect.
+   An endpoint is switched off after three days without a successful delivery, and events raised
+   while it is off are not kept: reconcile with `GET /v1/orders/{id}` after switching it back on.
+   Filter on `type`. Operating limits: `references/webhooks.md`.
 
 Signature format, verification code, per-event payloads and what to do with each event:
 `references/webhooks.md`. To exercise a local receiver without Supliful, sign and send a

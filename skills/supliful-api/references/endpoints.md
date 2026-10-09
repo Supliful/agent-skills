@@ -9,7 +9,7 @@ No auth. `200 {"status": "ok", "servedAt": "<date-time>"}`. Liveness only.
 
 ## GET /v1/me
 
-`200 {"connection": {"id": "<uuid>", "name": "string"}}`. Errors: 401, 403, 429.
+`200 {"connection": {"id": "<uuid>", "name": "string or null"}}`. Errors: 401, 403, 429.
 No side effects. Use it to validate a credential and to identify the connection when
 contacting support (never send the key itself).
 
@@ -45,7 +45,7 @@ Path `id` is a UUID. Returns one `Product`. Errors: 400, 401, 403, 404, 429.
 | dimensions | `{width, height, length, unit}` or null | unit: INCH, CENTIMETER, MILLIMETER. Outer container, for rating shipping |
 | weight | `{value, unit}` or null | unit: OUNCE, POUND, GRAM, KILOGRAM |
 | available | boolean | Snapshot, not a reservation. False means stop selling |
-| status | `active` or `discontinued` | Discontinued still resolves; new orders refused |
+| status | `active` or `discontinued` | Discontinued still resolves; a new order naming it is refused with 422 |
 | updatedAt | date-time | Changes when name, description, SKU or artwork change. Poll this to sync |
 
 ## POST /v1/orders
@@ -63,7 +63,8 @@ OrderAddress: `firstName`\*, `lastName`\* (1..100), `name` (1..200), `company` (
 `address1`\* (1..200), `address2` (..200), `city`\* (1..100), `stateCode` (..10), `zip`\* (1..20),
 `countryCode`\* (exactly 2 chars). Starred fields are required.
 
-OrderLineInput: `productId` uuid from `/v1/products`, `quantity` integer 1..10000.
+OrderLineInput: `productId` uuid from `/v1/products`, `quantity` integer 1..10000. There is no
+retail price: an international parcel declares the merchant's cost as its customs value.
 
 Responses:
 
@@ -71,15 +72,19 @@ Responses:
   `{id, testMode, status, createdAt, externalOrderId, lines: [{productId, quantity}]}`.
   `id` is a UUID, or `test_`-prefixed for a test order. A replay returns the order as it stands
   now, so its `status` may have moved on since creation.
-- `400` validation-failed (with `errors[]`), or neither key nor externalOrderId sent. Beyond schema
-  errors, three refusals come back this way; tell them apart by `errors[].path` and `message`:
-  - `lines.productId`, "… is not available to this connection": not exposed to you, or withdrawn
-  - `lines.productId`, "exposed but cannot currently be fulfilled": no working warehouse can take it
-  - `shippingAddress`: the address would be rejected at label creation. One entry per issue; show them to the buyer
-- `403` subscription-required: the merchant's plan does not include API ordering. Only this endpoint
-  answers it. `403` account-unavailable is the other 403; branch on `type`
+- `400` validation-failed (with `errors[]`): the body failed the schema, or neither key nor
+  externalOrderId was sent
+- `422` validation-failed: Supliful refuses the order. Tell the refusals apart this way:
+  - `errors[].path` `lines.productId`, "… is not available to this connection": not exposed to you, or withdrawn
+  - `errors[].path` `lines.productId`, "… is discontinued": Supliful no longer makes it. Stop offering it
+  - `errors[].path` `shippingAddress`: the address would be rejected at label creation. One entry per issue; show them to the buyer
+  - no `errors`, only `detail` "… exposed but cannot be fulfilled": the product has no fulfilment data yet. Retry later or ask the merchant
+- `403` subscription-required: the merchant has no active Pro or Enterprise membership. Only this
+  endpoint answers it, and not for `testMode` orders. `403` account-unavailable is the other 403;
+  branch on `type`
 - `409` order-already-exists (`orderId` of the existing order)
-- `422` idempotency-key-reused (`orderId` the key already produced)
+- `422` idempotency-key-reused (`orderId` the key already produced). Branch on `type` to tell it
+  from validation-failed
 - `401`, `429`
 
 A real order is charged to the merchant at creation. If that charge fails, the order is held with
@@ -87,7 +92,8 @@ A real order is charged to the merchant at creation. If that charge fails, the o
 
 ## GET /v1/orders/{orderId}
 
-Path `orderId` is Supliful's id **or** your `externalOrderId` (1..200). Returns `OrderDetail`:
+Path `orderId` is Supliful's id **or** your `externalOrderId` (1..200), for test orders too.
+Returns `OrderDetail`:
 
 | Field | Type | Notes |
 |---|---|---|
@@ -98,7 +104,7 @@ Path `orderId` is Supliful's id **or** your `externalOrderId` (1..200). Returns 
 | onHold | boolean | Separate from status; a held order keeps its status |
 | onHoldReasons | enum[] | `out_of_stock`, `payment_required`, `subscription_required`, `label_issue`, `invalid_address`, `customs_information_required`, `internal_review` |
 | createdAt | date-time | |
-| shippingAddress | object or null | All fields present, nullable: name, firstName, lastName, company, phone, address1, address2, city, stateCode, zip, countryCode |
+| shippingAddress | object or null | Every field present: name, firstName, lastName, address1, city, zip, countryCode; company, phone, address2 and stateCode may be null |
 | lines | OrderLine[] | `{id, productId, quantity, shipmentId or null}` |
 | shipments | OrderShipment[] | Empty until the first parcel is prepared |
 
@@ -107,8 +113,11 @@ An order can ship in parts: compare `lineIds` against `lines` rather than assumi
 A shipment is created over the lines it carries, so `lineIds` names them.
 A product can appear on more than one line (part of it covered by pre-paid units), so sum
 `quantity` by `productId` rather than keying lines by product.
+A parcel Supliful re-sends to replace a lost or damaged one appears in `shipments`, with `lineIds`
+naming the lines it replaces, so a line can be in more than one shipment.
 
-Errors: 401, 403, 404, 429.
+Errors: 401, 403, 404, 429. 404 `not-found` means no such order on this connection (or a test
+order past its two hours).
 
 ### Status
 
@@ -142,7 +151,9 @@ Errors: 401, 403, 404, 409, 429.
 
 Body `{event: <one of the ten event types>, orderId?: string 1..200}`. `202 {"deliveries": n}`.
 Delivers a real, signed, retried event to every enabled endpoint on the connection. The payload
-carries `testMode: true` and describes nothing that happened. `orderId` is echoed so you can match it.
+carries `testMode: true` and describes nothing that happened. For an order event, `orderId` is
+echoed so you can match it; product events ignore it and carry a placeholder `productId`. Test ids
+are not UUIDs, so do not validate webhook ids as UUIDs.
 
 ## POST /v1/test/orders/{orderId}/transitions
 
@@ -155,8 +166,13 @@ Rules the sandbox enforces:
 
 - A test order is kept for **two hours** from creation, and transitions do not extend it. A 404
   after that is by design, not a bug.
-- It stays `NEW` until you move it; unlike a real order it is never accepted by itself.
-- `ship` takes `lineIds` to rehearse a partial shipment; it defaults to every unshipped line.
+- It starts `NEW` (or `PROCESSING` when a line's quantity is unusually large, as a real order
+  would) and stays there until you move it; it is never accepted by itself.
+- `process` needs `NEW`; `accept` needs `NEW` or `PROCESSING`; `ship` is refused while the order is
+  on hold; a settled order (completed, canceled, returned) only allows `returnShipment`. A
+  transition that is not allowed answers `422 validation-failed`.
+- `ship` takes `lineIds` (the `test_` line ids from the order) to rehearse a partial shipment; it
+  defaults to every unshipped line.
 - `returnShipment` takes `shipmentId`; it defaults to the most recent parcel still out.
 - `hold` takes `reasons`; it defaults to `["out_of_stock"]`.
 - `complete` is refused while any line has no shipment.

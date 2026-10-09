@@ -8,15 +8,15 @@ something is missing here, no code change fixes it: the merchant has to do it in
 API connections need a **Pro or Enterprise** membership. It is checked on every request, not
 only at setup:
 
-- Without an active membership, or on a lower plan, the "Supliful API" card on the Stores page is
-  disabled with "A Pro membership is required to use the Supliful API" or "Upgrade to a Pro
-  membership to use the Supliful API".
+- Without an active membership the "Supliful API" card on the Stores page is disabled with
+  "A Pro membership is required to use the Supliful API".
 - If the membership lapses or is downgraded later, the keys are left untouched but
   `POST /v1/orders` answers `403 subscription-required`. Upgrading again restores it; no new key
   is needed.
 
-Publishing products also needs a saved label, a payment method, a verified email and an active
-membership. The product editor shows these as a checklist next to **Publish**.
+Publishing products also needs a saved label, a payment method, a verified email, a connected
+store and an active membership. Clicking **Publish** before they are done shows them as an
+"Almost ready to publish" checklist.
 
 ## 2. Create the API connection and get the key
 
@@ -27,32 +27,36 @@ membership. The product editor shows these as a checklist next to **Publish**.
 3. The key is shown **once**. Copy it straight into the backend's secret store
    (`SUPLIFUL_API_KEY`). It cannot be shown again; a lost key means issuing a new one.
 
-The connection then appears in the store list as "Connected via Supliful API", or "Requires an
-enabled API key" when it has none.
+The connection then appears in the store list as "Connected", or "No active API key" when it
+has none.
 
 ## 3. Manage keys
 
-[Store list](https://supliful.com/stores) → the connection's menu → **Settings** → **API keys** tab:
+[Store list](https://supliful.com/stores) → the connection's menu → **Manage** → **API keys** tab:
 
-- **Add a key** with a name (e.g. "Production", "Staging"). Each key has its own rate-limit counter,
-  so give each workload its own key. The table shows name, created and last used.
-- **Rotate** issues a new key and revokes the old one **immediately**. Deploy the new value
-  everywhere at once, or the old deploys start failing with 401.
-- **Revoke** stops a key immediately. Revoking the only enabled key stops all API requests for
+- **New key**, give it a name of up to 32 characters (e.g. "Production", "Staging"), then
+  **Create key**. A connection holds up to 5 keys. Each key has its own rate-limit counter, so
+  give each workload its own key. The table shows name, created and last used.
+- **Rotate key** (from the key's menu) issues a new key and revokes the old one **immediately**.
+  Deploy the new value everywhere at once, or the old deploys start failing with 401.
+- **Revoke key** stops a key immediately. Revoking the only enabled key stops all API requests for
   the connection until another is added.
 
 ## 4. Configure webhooks
 
-Same Settings dialog → **Webhooks** tab:
+Same **Manage** dialog → **Webhooks** tab:
 
-1. Enter the receiver URL (`https://`, publicly resolvable) and click **Add webhook**.
-2. Reveal or copy the endpoint's **signing secret** and store it in `SUPLIFUL_WEBHOOK_SECRETS`.
+1. **Add endpoint**, enter the receiver URL (`https://`, publicly resolvable) and click
+   **Add webhook**.
+2. Expand the endpoint's row to reveal or copy its **signing secret**, and store it in
+   `SUPLIFUL_WEBHOOK_SECRETS`.
 3. Verify the receiver with `POST /v1/test/webhooks` (see `webhooks.md`).
 
 Per endpoint you can also:
 
-- **Switch it off and on.** A switched-off endpoint receives nothing. It is also switched off
-  automatically after three days without a successful delivery; switch it back on here.
+- **Switch it off and on.** A switched-off endpoint receives nothing, and events raised meanwhile
+  are not kept. It is also switched off automatically after three days without a successful
+  delivery; switch it back on here, then reconcile open orders through the API.
 - **Edit URL**, e.g. when a tunnel's hostname changes. Pending retries go to the new URL.
 - **Rotate secret.** The previous secret keeps working for 24 hours, so deploy the new one within
   that window. Keep both in `SUPLIFUL_WEBHOOK_SECRETS` meanwhile.
@@ -67,21 +71,18 @@ you receive and reconcile with `GET /v1/orders/{orderId}` if you suspect one was
 A product is only visible to the connection, and orderable through it, while it is published to
 that connection.
 
-- **Publish:** open the product under **My Products**, finish the checklist, and click **Publish**.
-  With more than one store, choose the API connection in "Select one of your stores:". The
-  partner receives `product.published`, and the product appears in `GET /v1/products`.
-- **Unpublish:** click **Unpublish** on the product. The partner receives `product.unpublished`;
+- **Publish:** open the product under **My Products** and click **Publish** (or **Published**
+  if it is already live somewhere). The "Publish to stores" dialog lists every store; click
+  **Publish** on the API connection's row. The partner receives `product.published`, and the
+  product appears in `GET /v1/products`.
+- **Unpublish:** in the same dialog, click **Unpublish** on the API connection's row and confirm.
+  Only that store is affected. The partner receives `product.unpublished`;
   the product disappears from `GET /v1/products` and new orders naming it are refused with
-  `400 validation-failed` on `lines.productId`. Existing orders stay readable.
+  `422 validation-failed` on `lines.productId`. Existing orders stay readable.
 
-Current limits of the app, worth telling the merchant up front:
-
-- The app publishes a product to **one store at a time**, and only while it is not published
-  anywhere. A product already live in Shopify must be unpublished there before it can be
-  published to the API connection.
-- **Unpublish removes the product from every store** it is published to, not only from the API
-  connection.
-- Editing a published product's name, description, SKU or artwork sends `product.updated`.
+A product can be live in several stores at once, the API connection among them, and each is
+published or unpublished on its own. Editing a published product's name, description, SKU or
+artwork sends `product.updated`.
 
 ## Checklist before the first real order
 
