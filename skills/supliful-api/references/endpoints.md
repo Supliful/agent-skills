@@ -105,6 +105,8 @@ Path `orderId` is Supliful's id **or** your `externalOrderId` (1..200). Returns 
 OrderShipment: `{id, status: pending|shipped|returned, trackingNumber or null, trackingUrl or null, createdAt, lineIds[]}`.
 An order can ship in parts: compare `lineIds` against `lines` rather than assuming one shipment.
 A shipment is created over the lines it carries, so `lineIds` names them.
+A product can appear on more than one line (part of it covered by pre-paid units), so sum
+`quantity` by `productId` rather than keying lines by product.
 
 Errors: 401, 403, 404, 429.
 
