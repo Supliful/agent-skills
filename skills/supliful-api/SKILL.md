@@ -113,8 +113,8 @@ Field-level detail: `references/endpoints.md`.
 - **A held order keeps its status.** Read `onHold` and `onHoldReasons` separately from `status`.
   `payment_required` appears because a real order is charged at creation.
 - **Know the lifecycle.** `NEW` is accepted automatically about two hours after creation, and that
-  window is the only time you can cancel. `PROCESSING` means an unusually large line quantity is
-  waiting for Supliful's review; it cannot be canceled through the API. `ACCEPTED` then
+  window is the only time you can cancel. `PROCESSING` is rare and means the order requires
+  additional review; it cannot be canceled through the API. `ACCEPTED` then
   `IN_PROGRESS` (a warehouse has it), ending in `COMPLETED`, `CANCELED` or `RETURNED`. See
   `references/endpoints.md` for what each means to your system.
 - **Rate limit is 600 requests per 60 seconds per key**, shared across all your processes. A second key

@@ -124,7 +124,7 @@ order past its two hours).
 | Status | Meaning | Cancelable |
 |---|---|---|
 | `NEW` | Placed, not yet accepted. Accepted automatically about two hours after creation | Yes |
-| `PROCESSING` | An unusually large line quantity; waiting for Supliful to review and accept it | No |
+| `PROCESSING` | Rare; the order requires additional review before it is accepted | No |
 | `ACCEPTED` | Accepted for fulfilment | No |
 | `IN_PROGRESS` | A warehouse has it | No |
 | `COMPLETED` | Every line shipped. Terminal | No |
@@ -166,8 +166,8 @@ Rules the sandbox enforces:
 
 - A test order is kept for **two hours** from creation, and transitions do not extend it. A 404
   after that is by design, not a bug.
-- It starts `NEW` (or `PROCESSING` when a line's quantity is unusually large, as a real order
-  would) and stays there until you move it; it is never accepted by itself.
+- It starts `NEW` (or `PROCESSING` when a real order would require
+  additional review) and stays there until you move it; it is never accepted by itself.
 - `process` needs `NEW`; `accept` needs `NEW` or `PROCESSING`; `ship` is refused while the order is
   on hold; a settled order (completed, canceled, returned) only allows `returnShipment`. A
   transition that is not allowed answers `422 validation-failed`.
