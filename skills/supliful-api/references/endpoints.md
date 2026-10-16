@@ -40,13 +40,14 @@ Path `id` is a UUID. Returns one `Product`. Errors: 400, 401, 403, 404, 429.
 | shortDescription | string | One-line summary for a tile |
 | description | string | Full text for a product page |
 | sku | string or null | Merchant's SKU, not unique |
+| retailPrice | number | Merchant's consumer price in USD. A suggestion for your storefront, never what Supliful charges |
 | imageUrl | uri or null | May point at one of `mockupUrls` |
 | mockupUrls | uri[] | Newest first, may be empty |
 | dimensions | `{width, height, length, unit}` or null | unit: INCH, CENTIMETER, MILLIMETER. Outer container, for rating shipping |
 | weight | `{value, unit}` or null | unit: OUNCE, POUND, GRAM, KILOGRAM |
 | available | boolean | Snapshot, not a reservation. False means stop selling |
 | status | `active` or `discontinued` | Discontinued still resolves; a new order naming it is refused with 422 |
-| updatedAt | date-time | Changes when name, description, SKU or artwork change. Poll this to sync |
+| updatedAt | date-time | Changes when name, description, SKU, retail price or artwork change. Poll this to sync |
 
 ## POST /v1/orders
 
