@@ -81,8 +81,8 @@ that connection.
   `422 validation-failed` on `lines.productId`. Existing orders stay readable.
 
 A product can be live in several stores at once, the API connection among them, and each is
-published or unpublished on its own. Editing a published product's name, description, SKU or
-artwork sends `product.updated`.
+published or unpublished on its own. Editing a published product's name, description, SKU, retail
+price or artwork sends `product.updated`.
 
 ## Checklist before the first real order
 

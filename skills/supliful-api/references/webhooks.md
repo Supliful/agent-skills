@@ -78,9 +78,9 @@ Real deliveries carry `data.testMode: false`.
 | order.shipmentCreated | `orderId`, `externalOrderId`, `shipmentId`, `trackingNumber` or null, `trackingUrl` or null | A parcel is labelled and on its way. Not order completion; several per order possible. A parcel re-sent to replace a lost one arrives under the original order |
 | order.shipmentReturned | same as above | A parcel came back |
 | order.completed | `orderId`, `externalOrderId` | Every line fulfilled. Can arrive again after a replacement parcel ships |
-| product.published | `productId`, `sku` or null | Merchant exposed the product; orderable from now |
-| product.unpublished | `productId`, `sku` | Withdrawn; orders naming it will be rejected |
-| product.updated | `productId`, `sku` | Name, description, SKU or artwork changed. Payload does not say which; refetch |
+| product.published | `productId`, `sku` or null, `retailPrice` or null | Merchant exposed the product; orderable from now |
+| product.unpublished | `productId`, `sku`, `retailPrice` | Withdrawn; orders naming it will be rejected |
+| product.updated | `productId`, `sku`, `retailPrice` | Name, description, SKU, retail price or artwork changed. Payload does not say which; refetch |
 
 Order events are only sent for orders placed through your connection. `externalOrderId` is the
 value you sent, or null when you placed the order with only an `Idempotency-Key`.
@@ -101,8 +101,10 @@ partially shipped (every shipment names its lines in `lineIds`); otherwise
 
 Product events:
 - `product.published`: fetch the product, create or reactivate your local record. If your
-  system prices products, create it unpriced and hidden until someone prices it.
-- `product.updated`: fetch and refresh name, description, SKU, images. Keep your own price.
+  system prices products, start from `retailPrice` (the merchant's suggestion) or create it
+  unpriced and hidden until someone prices it.
+- `product.updated`: fetch and refresh name, description, SKU, images. Take the new `retailPrice`
+  only if you follow the merchant's price; otherwise keep your own.
   Hide it if `status` became `discontinued` or `available` is false.
 - `product.unpublished`: hide it and refuse it at checkout. Do not delete: existing orders reference it.
 

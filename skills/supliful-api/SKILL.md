@@ -108,6 +108,7 @@ Field-level detail: `references/endpoints.md`.
   buyer); a 422 with no `errors`, only `detail`, means the product exists but cannot be fulfilled
   yet. Treat the 422s as a decision about the order, not a bug in your request.
 - **Prices are the merchant's.** Your retail price never reaches Supliful; the order carries no shipping cost.
+  A product's `retailPrice` is the merchant's suggested consumer price (USD), not what Supliful charges.
 - **Tracking mail goes to the merchant's account email.** To inform the buyer, pass on
   `trackingUrl` from each shipment (`GET /v1/orders/{orderId}` and `order.shipmentCreated`).
 - **A held order keeps its status.** Read `onHold` and `onHoldReasons` separately from `status`.
